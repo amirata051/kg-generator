@@ -16,3 +16,9 @@ MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
 # Kafka settings
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC")
+
+# FalkorDB settings
+FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
+FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", 6379))
+KG_NAME = os.getenv("KG_NAME", "kg")
+
