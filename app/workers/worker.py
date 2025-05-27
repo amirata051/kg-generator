@@ -1,7 +1,7 @@
-# app/workers/worker.py
 import io
 import json
 import logging
+import threading
 from kafka import KafkaConsumer
 from app.services.minio_client import minio_client, BUCKET_NAME
 from unstructured.partition.auto import partition
@@ -22,6 +22,19 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Global KnowledgeGraph instance and thread lock for safe access
+kg_lock = threading.Lock()
+global_kg = None
+
+def set_global_kg(kg):
+    global global_kg
+    with kg_lock:
+        global_kg = kg
+
+def get_global_kg():
+    with kg_lock:
+        return global_kg
 
 def process_message(task: dict):
     file_id = task["file_id"]
@@ -68,12 +81,13 @@ def process_message(task: dict):
         ontology=ontology,
         host=FALKORDB_HOST,
         port=FALKORDB_PORT,
-        # username and password optional, add if needed
     )
 
     # 9) Ingest extracted elements into the KnowledgeGraph (stores in FalkorDB)
-    # kg.ingest(elements)
     kg.process_sources(sources=[source])
+
+    # 10) Store KG instance globally for chat API usage
+    set_global_kg(kg)
 
     logger.info(f"Graph updated for file_id={file_id}")
 
