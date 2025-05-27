@@ -9,3 +9,9 @@ minio_client = Minio(
     secret_key=MINIO_SECRET_KEY,
     secure=MINIO_SECURE
 )
+
+# Ensure the bucket exists at startup
+# check and create bucket if missing
+BUCKET_NAME = "pdf-bucket"
+if not minio_client.bucket_exists(BUCKET_NAME):
+    minio_client.make_bucket(BUCKET_NAME)
