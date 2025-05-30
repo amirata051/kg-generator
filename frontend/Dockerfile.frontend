@@ -1,0 +1,21 @@
+# frontend/Dockerfile.frontend
+#
+# Builds a container for the Streamlit frontend.
+
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /frontend
+
+# Install only needed frontend deps
+COPY ../requirements.txt .
+RUN pip install --no-cache-dir streamlit requests networkx matplotlib
+
+# Copy frontend code
+COPY . .
+
+# Expose Streamlit port
+EXPOSE 8501
+
+# Launch Streamlit
+CMD ["streamlit", "run", "app_frontend.py", "--server.address=0.0.0.0", "--server.port=8501"]
