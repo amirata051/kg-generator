@@ -222,7 +222,3 @@ Feel free to open issues or contact the maintainer for questions or feature requ
 
 ---
 
-This README is crafted to showcase a modern, production-grade ML engineering project with full container orchestration, async processing, and rich functionality — perfect for impressing technical reviewers and teammates alike.
-
-```
-```
