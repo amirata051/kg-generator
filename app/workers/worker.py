@@ -2,8 +2,11 @@
 import io
 import json
 import logging
+import hashlib
+
 from kafka import KafkaConsumer
 from app.services.minio_client import minio_client, BUCKET_NAME
+from app.services.redis_client import redis_client, ELEMENTS_SET
 from unstructured.partition.auto import partition
 from graphrag_sdk import KnowledgeGraph, KnowledgeGraphModelConfig, Ontology
 from graphrag_sdk.models.litellm import LiteModel
@@ -17,68 +20,71 @@ from app.config import (
 )
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def sha256_hex(data: bytes) -> str:
+    """Compute SHA-256 hex digest for given bytes."""
+    return hashlib.sha256(data).hexdigest()
+
 def process_message(task: dict):
     file_id = task["file_id"]
     object_name = task["object_name"]
-
     logger.info(f"Processing file_id={file_id}, object={object_name}")
 
-    # 1) Download PDF from MinIO storage
+    # 1) Download PDF from MinIO
     response = minio_client.get_object(BUCKET_NAME, object_name)
     pdf_bytes = response.read()
 
+    # 2) Save to local temp file for partitioning
     local_path = f"/tmp/{object_name}"
     with open(local_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # 2) Extract elements from PDF using unstructured-io
+    # 3) Extract elements from PDF
     elements = partition(filename=local_path)
-    logger.info(f"Extracted {len(elements)} elements from PDF")
+    logger.info(f"Extracted {len(elements)} elements")
 
-    # 3) Concatenate all text elements for ontology creation
-    full_text = " ".join([element.text for element in elements if hasattr(element, "text")])
+    # 4) Filter elements by text-hash only
+    new_texts = []
+    for el in elements:
+        if not hasattr(el, "text"):
+            continue
+        text_bytes = el.text.encode("utf-8")
+        elem_hash = sha256_hex(text_bytes)
+        # if this text hasn't been processed before, keep it
+        if not redis_client.sismember(ELEMENTS_SET, elem_hash):
+            redis_client.sadd(ELEMENTS_SET, elem_hash)
+            new_texts.append(el.text)
 
-    # 4) Create a Source object from raw text (required by Ontology.from_sources)
+    # 5) If no new text found, skip further processing
+    if not new_texts:
+        logger.info("No new content found; skipping incremental update.")
+        return
+
+    # 6) Build ontology from only the new texts
+    full_text = " ".join(new_texts)
     source = Source_FromRawText(full_text)
-
-    # 5) Initialize the LLM model (using Gemini model)
     model = LiteModel(model_name="gemini/gemini-2.0-flash")
-
-    # 6) Create Ontology from the source text and model
     ontology = Ontology.from_sources(sources=[source], model=model)
-    logger.info("Ontology created from extracted text")
+    logger.info("Ontology created for new content")
 
-    # Optional: save ontology JSON to disk for debugging
-    with open("/tmp/ontology.json", "w", encoding="utf-8") as f:
-        f.write(json.dumps(ontology.to_json(), indent=2))
-
-    # 7) Setup KnowledgeGraphModelConfig with the initialized model
+    # 7) Ingest incrementally via process_sources
     model_config = KnowledgeGraphModelConfig.with_model(model)
-
-    # 8) Initialize KnowledgeGraph instance with ontology and FalkorDB connection details
     kg = KnowledgeGraph(
         name=KG_NAME,
         model_config=model_config,
         ontology=ontology,
         host=FALKORDB_HOST,
         port=FALKORDB_PORT,
-        # username and password optional, add if needed
     )
-
-    # 9) Ingest extracted elements into the KnowledgeGraph (stores in FalkorDB)
-    # kg.ingest(elements)
     kg.process_sources(sources=[source])
-
-    logger.info(f"Graph updated for file_id={file_id}")
+    logger.info("Graph updated with incremental content")
 
 def main():
-    # Initialize Kafka consumer with necessary configurations
     consumer = KafkaConsumer(
         KAFKA_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS.split(","),
@@ -87,10 +93,7 @@ def main():
         enable_auto_commit=True,
         group_id="pdf_worker_group"
     )
-
     logger.info(f"Worker started, listening on topic='{KAFKA_TOPIC}'")
-
-    # Consume messages continuously from Kafka topic and process them
     for message in consumer:
         try:
             process_message(message.value)

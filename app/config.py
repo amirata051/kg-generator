@@ -22,3 +22,7 @@ FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
 FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", 6379))
 KG_NAME = os.getenv("KG_NAME", "kg")
 
+# Redis settings for hashing state
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6380))
+REDIS_DB = int(os.getenv("REDIS_DB", 0))
